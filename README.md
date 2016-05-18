@@ -1,0 +1,1 @@
+# Hexchat-Yandex-Translator-Plugin
