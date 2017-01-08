@@ -7,8 +7,7 @@
 # ############################
 
 import json
-import urllib
-import urllib2
+import urllib.request, urllib.parse, urllib.error
 import threading
 import hexchat
 
@@ -19,8 +18,8 @@ import hexchat
 # ############################
 
 __module_name__ = "yandex translator"
-__module_version__ = "1.0"
-__module_description__ = "Translates from one language to others using Yanxdex Translate."
+__module_version__ = "1.1"
+__module_description__ = "Translates from one language to others using Yandex Translate."
 __module_author__ = "EpicJhon"
 
 # ############################
@@ -64,19 +63,18 @@ def translate(message, _from=default_from, to=default_to):
         'format': 'plain'
     }
 
-    data = urllib.urlencode(translation_params)
-    req = urllib2.Request(base_url, data)
+    data = urllib.parse.urlencode(translation_params).encode('UTF-8')
+    req = urllib.request.Request(base_url, data)
     try:
-        response = urllib2.urlopen(req)
-    except urllib2.URLError as e:
-        print 'Error: ', e
+        response = urllib.request.urlopen(req)
+    except urllib.error.URLError as e:
+        print('Error: ', e)
         pass
 
-    data = response.read()
+    data = response.read().decode('utf-8')
     data = json.loads(data)
-
-    lang_from_to = data['lang'].encode('utf-8')
-    final_text = data['text'][0].encode('utf-8')
+    lang_from_to = data['lang']
+    final_text = data['text'][0]
     return lang_from_to, final_text
 
 
@@ -86,12 +84,12 @@ def translate(message, _from=default_from, to=default_to):
 #
 # ############################
 
-def worker_hook_print_message(message, nick, _from=default_from, to=default_to):
+def worker_hook_print_message(context, message, nick, _from=default_from, to=default_to):
     # translate message
     lang_from_to, final_text = translate(message, _from, to)
     # show
     translation = 'T:' + lang_from_to + '>' + final_text
-    print Bold + nick + NormalText + Color + '08 ' + translation
+    context.prnt(Bold + nick + NormalText + Color + '08 ' + translation)
 
 
 def worker_hook_tr(message, _from=default_from, to=default_to):
@@ -99,14 +97,15 @@ def worker_hook_tr(message, _from=default_from, to=default_to):
     lang_from_to, final_text = translate(message, _from, to)
     # show
     translation = 'T:' + lang_from_to + '> ' + final_text
-    print Bold + hexchat.get_info('nick') + NormalText + Color + '08 ' + translation
+    print(Bold + hexchat.get_info('nick') + NormalText + Color + '08 ' + translation)
 
 
-def worker_hook_str(message, _from=default_from, to=default_to):
+# translate your message and send to server
+def worker_hook_str(context, message, _from=default_from, to=default_to):
     # translate message
     lang_from_to, final_text = translate(message, to, _from)
-    # send translated message
-    hexchat.command('SAY ' + final_text)
+    # print and send translated message to server
+    context.command('SAY ' + final_text)
 
 
 # ############################
@@ -131,6 +130,7 @@ def hook_add_channel(word, word_eol, userdata):
         src_lang = word[3]
 
     AUTOCHANNEL[hexchat.get_info('network') + ' ' + channel.lower()] = (dest_lang, src_lang)
+    hexchat.set_pluginpref('yandex_tr_auto_channel', str(AUTOCHANNEL))
     hexchat.prnt("Added channel %s to the watch list." % channel)
 
     return hexchat.EAT_ALL
@@ -143,7 +143,9 @@ def hook_remove_channel(word, word_eol, userdata):
         channel = hexchat.get_info('channel')
 
     if AUTOCHANNEL.pop(hexchat.get_info('network') + ' ' + channel.lower(), None) is not None:
+        hexchat.set_pluginpref('yandex_tr_auto_channel', str(AUTOCHANNEL))
         hexchat.prnt('Channel ' + channel + ' has been removed from the watch list.')
+
     return hexchat.EAT_ALL
 
 
@@ -162,8 +164,8 @@ def hook_add_user(word, word_eol, userdata):
     if len(word) > 3:
         src_lang = word[3]
 
-    AUTOUSER[hexchat.get_info('channel') + ' ' + user.lower()] = (dest_lang, src_lang)
-    hexchat.set_pluginpref('AUTOUSER', AUTOUSER)
+    AUTOUSER[hexchat.get_info('network') + ' ' + hexchat.get_info('channel') + ' ' + user.lower()] = (dest_lang, src_lang)
+    hexchat.set_pluginpref('yandex_tr_auto_user', str(AUTOUSER))
     hexchat.prnt("Added user %s to the watch list." % user)
 
     return hexchat.EAT_ALL
@@ -176,10 +178,9 @@ def hook_remove_user(word, word_eol, userdata):
 
     user = hexchat.strip(word[1])
 
-    if AUTOUSER.pop(hexchat.get_info('channel') + ' ' + user.lower(), None) is not None:
+    if AUTOUSER.pop(hexchat.get_info('network') + ' ' + hexchat.get_info('channel') + ' ' + user.lower(), None) is not None:
+        hexchat.set_pluginpref('yandex_tr_auto_user', str(AUTOUSER))
         hexchat.prnt('User ' + user + ' has been removed from the watch list.')
-
-    hexchat.set_pluginpref('AUTOUSER', AUTOUSER)
 
     return hexchat.EAT_ALL
 
@@ -191,6 +192,14 @@ def hook_print_watch_list(word, word_eol, userdata):
 
 
 def hook_tr(word, word_eol, userdata):
+    _from = default_from
+    to = default_to
+    message = word_eol[3]
+    threading.Thread(target=worker_hook_tr, args=(message, _from, to)).start()
+    return hexchat.EAT_ALL
+
+
+def hook_tra(word, word_eol, userdata):
     _from = word[1]
     to = word[2]
     message = word_eol[3]
@@ -200,21 +209,23 @@ def hook_tr(word, word_eol, userdata):
 
 def hook_str(word, word_eol, userdata):
     message = word_eol[1]
-    print Bold + hexchat.get_info('nick') + NormalText + Color + '08 > ' + message
-    threading.Thread(target=worker_hook_str, args=(message,)).start()
+    context = hexchat.get_context()
+    print(Bold + hexchat.get_info('nick') + NormalText + Color + '08 > ' + message)
+    threading.Thread(target=worker_hook_str, args=(context, message,)).start()
     return hexchat.EAT_ALL
 
 
 def hook_say(word, word_eol, userdata):
     message = hexchat.strip(word_eol[0])
     channel = hexchat.get_info('channel')
+    context = hexchat.get_context()
 
     key = hexchat.get_info('network') + ' ' + channel.lower()
 
     if key in AUTOCHANNEL and message[:2] == '!!':
-        print Bold + hexchat.get_info('nick') + NormalText + Color + '13 > ' + message[2:]
+        print(Bold + hexchat.get_info('nick') + NormalText + Color + '13 > ' + message[2:])
         dest_lang, src_lang = AUTOCHANNEL[key]
-        threading.Thread(target=worker_hook_str, args=(message[2:], src_lang, dest_lang)).start()
+        threading.Thread(target=worker_hook_str, args=(context, message[2:], src_lang, dest_lang)).start()
         return hexchat.EAT_ALL
 
     return hexchat.EAT_NONE
@@ -224,12 +235,13 @@ def hook_print_message(word, word_eol, userdata):
     nick = hexchat.strip(word[0])
     message = hexchat.strip(word[1])
     channel = hexchat.get_info('channel')
+    context = hexchat.get_context()
 
-    key = channel + ' ' + nick.lower()
+    key = hexchat.get_info('network') + ' ' + channel + ' ' + nick.lower()
 
     if key in AUTOUSER:
         dest_lang, src_lang = AUTOUSER[key]
-        threading.Thread(target=worker_hook_print_message, args=(message, nick, src_lang, dest_lang)).start()
+        threading.Thread(target=worker_hook_print_message, args=(context, message, nick, src_lang, dest_lang)).start()
 
     return hexchat.EAT_NONE
 
@@ -265,8 +277,11 @@ hexchat.hook_command('RMTR', hook_remove_user, help=help_message, priority=hexch
 help_message = '/LSUSERS - prints out all users on the watch list for automatic translations to the screen locally.'
 hexchat.hook_command('LSUSERS', hook_print_watch_list, help=help_message, priority=hexchat.PRI_HIGHEST)
 
-help_message = '/TR <source language> <target language> <message> - translates message into the language specified.  This auto detects the source language.'
+help_message = '/TR <message> - translates message into the language according to form "to-from".  This auto detects the source language.'
 hexchat.hook_command('TR', hook_tr, help=help_message, priority=hexchat.PRI_HIGHEST)
+
+help_message = '/TRA <source language> <target language> <message> - translates message into the language specified.  This auto detects the source language.'
+hexchat.hook_command('TRA', hook_tra, help=help_message, priority=hexchat.PRI_HIGHEST)
 
 help_message = '/STR <message> - sends a message translated according to form "to-from", where "from" is the default language of origin and "to" is the default language destination.'
 hexchat.hook_command('STR', hook_str, help=help_message, priority=hexchat.PRI_HIGHEST)
@@ -275,6 +290,7 @@ hexchat.hook_command('', hook_say, priority=hexchat.PRI_HIGHEST)
 
 # prints
 
+hexchat.hook_print('Private Message to Dialog', hook_print_message, priority=hexchat.PRI_HIGHEST)
 hexchat.hook_print('Channel Message', hook_print_message, priority=hexchat.PRI_HIGHEST)
 hexchat.hook_print('Channel Msg Hilight', hook_print_message, priority=hexchat.PRI_HIGHEST)
 
@@ -290,6 +306,12 @@ hexchat.hook_unload(hook_unload)
 
 print('Yandex Translator loaded!')
 
-AUTOUSER = hexchat.get_pluginpref('AUTOUSER')
-if AUTOUSER is None:
-    AUTOUSER = {}
+try:
+    AUTOUSER = eval(hexchat.get_pluginpref('yandex_tr_auto_user'))
+except:
+    pass
+
+try:
+    AUTOCHANNEL = eval(hexchat.get_pluginpref('yandex_tr_auto_channel'))
+except:
+    pass
