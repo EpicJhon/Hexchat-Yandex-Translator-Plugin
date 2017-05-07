@@ -228,7 +228,7 @@ def hook_print_channel_list(word, word_eol, userdata):
 def hook_tr(word, word_eol, userdata):
     _from = default_from
     to = default_to
-    message = word_eol[3]
+    message = word_eol[1]
     threading.Thread(target=worker_hook_tr, args=(message, _from, to)).start()
     return hexchat.EAT_ALL
 
